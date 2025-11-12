@@ -1,3 +1,20 @@
-lib/analytics/output
-# service account keys
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.venv/
+env/
+venv/
+
+# Plot Outputs
+output/
+*.png
+
+# Geheimnisse
 serviceAccount.json
+
+# Sonstige IDE/Build Dateien
+.idea/
+.vscode/
+.DS_Store
