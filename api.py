@@ -1,5 +1,5 @@
 """
-CEDmate Analytics – final abgesicherte Version (keine .env nötig)
+CEDmate Analytics – finale Version (public Output URLs, ohne .env)
 -----------------------------------------------------------------
 Zulässig:
 - deine Flutter-Webseite (GitHub Pages)
@@ -8,29 +8,44 @@ Zulässig:
 
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+from pathlib import Path
 from firebase_admin import auth
 from cedmate_analytics import generate_analytics_for_user
 import re
+import os
 
-app = FastAPI(title="CEDmate Analytics API", version="3.0")
+app = FastAPI(title="CEDmate Analytics API", version="3.1")
 
 # -------------------------------------------------------------------
 # KONFIGURATION
 # -------------------------------------------------------------------
 
-import os
-
+# 🔐 API-Key: zuerst versuchen aus Environment (Render),
+# ansonsten Fallback für lokale Tests
 API_KEY = os.getenv("API_KEY", "CEDmateHAWahmad1#")
 
-# Zugelassene Ursprünge (Domains)
+# 🌍 Erlaubte Domains (Web + lokal)
 ALLOWED_ORIGINS = [
-    "https://ahmad-kalaf.github.io",     # GitHub Pages Domain
+    "https://ahmad-kalaf.github.io",          # GitHub Pages Domain
     "https://ahmad-kalaf.github.io/CEDmate",  # direkter Pfad
-    "http://localhost",                  # für lokale Tests
+    "http://localhost",                       # lokale Tests (Flutter)
     "http://127.0.0.1",
 ]
 
-# CORS konfigurieren (nur deine App darf Anfragen senden)
+# 🖥️ Vertrauenswürdige User-Agents (App-Erkennung)
+TRUSTED_USER_AGENTS = ["CEDmate", "okhttp", "dart:io", "flutter"]
+
+# -------------------------------------------------------------------
+# STATIC FILES (macht Diagramme öffentlich erreichbar)
+# -------------------------------------------------------------------
+output_dir = Path(__file__).resolve().parent / "output"
+output_dir.mkdir(exist_ok=True)
+app.mount("/output", StaticFiles(directory=output_dir), name="output")
+
+# -------------------------------------------------------------------
+# CORS-Einstellungen
+# -------------------------------------------------------------------
 app.add_middleware(
     CORSMiddleware,
     allow_origins=ALLOWED_ORIGINS,
@@ -38,9 +53,6 @@ app.add_middleware(
     allow_methods=["GET"],
     allow_headers=["x-api-key", "Content-Type", "Authorization"],
 )
-
-# Optional: App-Header-Erkennung für native Apps
-TRUSTED_USER_AGENTS = ["CEDmate", "okhttp", "dart:io"]
 
 # -------------------------------------------------------------------
 # Healthcheck
@@ -50,14 +62,16 @@ def root():
     return {"status": "ok", "message": "CEDmate Analytics API aktiv"}
 
 # -------------------------------------------------------------------
-# Hauptendpunkt
+# Hauptendpunkt: /analytics
 # -------------------------------------------------------------------
 @app.get("/analytics")
 async def analytics(request: Request, user: str):
     """
-    Erlaubt nur Zugriffe von:
-      - https://ahmad-kalaf.github.io/CEDmate/
-      - deiner App (Header x-api-key)
+    Generiert Analysen für einen Benutzer (user = Firebase UID)
+    Nur erlaubt:
+      - wenn gültiger x-api-key vorhanden ist
+      - wenn Origin zu ALLOWED_ORIGINS gehört (Web)
+      - oder App-User-Agent erkannt wird (Mobile/Desktop)
     """
 
     # 1️⃣ API-Key prüfen
@@ -77,9 +91,23 @@ async def analytics(request: Request, user: str):
 
     # 4️⃣ Analyse starten
     try:
+        print(f"📊 Starte Analyse für User: {user}")
         results = generate_analytics_for_user(user)
-        data = {k: str(v) if v else None for k, v in results.items()}
+
+        # Basis-URL automatisch ermitteln
+        base_url = "https://cedmate-analytics-api.onrender.com"
+        data = {}
+
+        for k, v in results.items():
+            if v:
+                filename = Path(str(v)).name
+                data[k] = f"{base_url}/output/{filename}"
+            else:
+                data[k] = None
+
+        print(f"✅ Fertig: {data}")
         return {"status": "ok", "user": user, "results": data}
+
     except Exception as e:
         print(f"⚠️ Fehler bei Analytics für {user}: {e}")
         raise HTTPException(status_code=500, detail=str(e))
