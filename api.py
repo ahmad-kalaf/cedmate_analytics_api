@@ -18,8 +18,9 @@ app = FastAPI(title="CEDmate Analytics API", version="3.0")
 # KONFIGURATION
 # -------------------------------------------------------------------
 
-# Fester geheimer Schlüssel (nur du und dein Team kennen ihn)
-API_KEY = "meinSuperGeheimerKey123"
+import os
+
+API_KEY = os.getenv("API_KEY", "CEDmateHAWahmad1#")
 
 # Zugelassene Ursprünge (Domains)
 ALLOWED_ORIGINS = [
