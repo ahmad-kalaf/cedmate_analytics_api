@@ -1,155 +1,113 @@
+"""
+CEDmate Analytics – finale Version (public Output URLs, ohne .env)
+-----------------------------------------------------------------
+Zulässig:
+- deine Flutter-Webseite (GitHub Pages)
+- deine App (Android / Windows)
+"""
+
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pathlib import Path
+from firebase_admin import auth
 from cedmate_analytics import generate_analytics_for_user
-import os
 import re
+import os
 
-app = FastAPI(
-    title="CEDmate Analytics API",
-    description="Backend zur Generierung von Diagrammen für die CEDmate-App."
-)
+app = FastAPI(title="CEDmate Analytics API", version="3.1")
 
-# -------------------------------------------------------------
-# Konfiguration: API-Key, Environment, Origin-Listen
-# -------------------------------------------------------------
+# -------------------------------------------------------------------
+# KONFIGURATION
+# -------------------------------------------------------------------
 
+# 🔐 API-Key: zuerst versuchen aus Environment (Render),
+# ansonsten Fallback für lokale Tests
 API_KEY = os.getenv("API_KEY", "CEDmateHAWahmad1#")
-ENV = os.getenv("ENV", "development").lower()
 
-# Produktions-Frontend (GitHub Pages)
-PROD_ORIGINS = [
-    "https://ahmad-kalaf.github.io",
-    "https://ahmad-kalaf.github.io/CEDmate",
-]
-
-# Entwicklungs-Frontends (lokale Flutter Web Tests)
-DEV_ORIGINS = [
-    "http://localhost",
+# 🌍 Erlaubte Domains (Web + lokal)
+ALLOWED_ORIGINS = [
+    "https://ahmad-kalaf.github.io",          # GitHub Pages Domain
+    "https://ahmad-kalaf.github.io/CEDmate",  # direkter Pfad
+    "http://localhost",                       # lokale Tests (Flutter)
     "http://127.0.0.1",
 ]
 
-# erlaubt localhost mit beliebigen Ports (Flutter web)
-LOCALHOST_REGEX = r"^http://(localhost|127\.0\.0\.1)(:\d+)?$"
+# 🖥️ Vertrauenswürdige User-Agents (App-Erkennung)
+TRUSTED_USER_AGENTS = ["CEDmate", "okhttp", "dart:io", "flutter"]
 
-# Native App User-Agents
-TRUSTED_USER_AGENTS = [
-    "flutter",
-    "dart:io",
-    "okhttp",
-    "cedmate",
-    "mozilla"       # notwendig für Browser / Flutter Web
-]
-
-# -------------------------------------------------------------
-# Output-Verzeichnis öffentlich erreichbar machen
-# -------------------------------------------------------------
-
+# -------------------------------------------------------------------
+# STATIC FILES (macht Diagramme öffentlich erreichbar)
+# -------------------------------------------------------------------
 output_dir = Path(__file__).resolve().parent / "output"
 output_dir.mkdir(exist_ok=True)
 app.mount("/output", StaticFiles(directory=output_dir), name="output")
 
-# -------------------------------------------------------------
-# CORS Konfiguration für Browser
-# -------------------------------------------------------------
-
-def build_cors_list():
-    if ENV == "production":
-        return PROD_ORIGINS
-    return PROD_ORIGINS + DEV_ORIGINS
-
-CORS_ALLOWED = build_cors_list()
-
+# -------------------------------------------------------------------
+# CORS-Einstellungen
+# -------------------------------------------------------------------
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=CORS_ALLOWED,
+    allow_origins=ALLOWED_ORIGINS,
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET"],
+    allow_headers=["x-api-key", "Content-Type", "Authorization"],
 )
 
-
-# -------------------------------------------------------------
+# -------------------------------------------------------------------
 # Healthcheck
-# -------------------------------------------------------------
-
+# -------------------------------------------------------------------
 @app.get("/")
 def root():
-    return {
-        "status": "ok",
-        "environment": ENV,
-        "message": "CEDmate Analytics API aktiv"
-    }
+    return {"status": "ok", "message": "CEDmate Analytics API aktiv"}
 
-# -------------------------------------------------------------
-# Origin Prüffunktion
-# -------------------------------------------------------------
-
-def is_allowed_origin(origin: str) -> bool:
-    if ENV == "production":
-        return origin in PROD_ORIGINS
-    if origin in PROD_ORIGINS:
-        return True
-    if re.match(LOCALHOST_REGEX, origin or ""):
-        return True
-    return False
-
-# -------------------------------------------------------------
-# User-Agent Prüffunktion
-# -------------------------------------------------------------
-
-def is_allowed_user_agent(agent: str) -> bool:
-    agent = agent.lower()
-    return any(token in agent for token in TRUSTED_USER_AGENTS)
-
-# -------------------------------------------------------------
-# Analytics Endpoint — GET + OPTIONS
-# -------------------------------------------------------------
-
-@app.api_route("/analytics", methods=["GET", "OPTIONS"])
+# -------------------------------------------------------------------
+# Hauptendpunkt: /analytics
+# -------------------------------------------------------------------
+@app.get("/analytics")
 async def analytics(request: Request, user: str):
+    """
+    Generiert Analysen für einen Benutzer (user = Firebase UID)
+    Nur erlaubt:
+      - wenn gültiger x-api-key vorhanden ist
+      - wenn Origin zu ALLOWED_ORIGINS gehört (Web)
+      - oder App-User-Agent erkannt wird (Mobile/Desktop)
+    """
 
-    if request.method == "OPTIONS":
-        return {}
-
-
-    # API-Key prüfen
+    # 1️⃣ API-Key prüfen
     key = request.headers.get("x-api-key")
     if key != API_KEY:
         raise HTTPException(status_code=401, detail="Unauthorized: Invalid API key")
 
-    # Origin prüfen (nur Browser)
+    # 2️⃣ Herkunft (Origin) prüfen – für Web-Aufrufe
     origin = request.headers.get("origin", "")
-    if origin:
-        if not is_allowed_origin(origin):
-            raise HTTPException(status_code=403, detail=f"Forbidden origin: {origin}")
+    if origin and not any(origin.startswith(o) for o in ALLOWED_ORIGINS):
+        raise HTTPException(status_code=403, detail=f"Forbidden origin: {origin}")
 
-    # User-Agent prüfen (native Apps, kein Origin)
-    agent = request.headers.get("user-agent", "")
-    if not origin:
-        if not is_allowed_user_agent(agent):
-            raise HTTPException(status_code=403, detail="Forbidden: Invalid User-Agent")
+    # 3️⃣ User-Agent prüfen – für native Apps (APK / Windows)
+    agent = request.headers.get("user-agent", "").lower()
+    if origin == "" and not any(re.search(pat.lower(), agent) for pat in TRUSTED_USER_AGENTS):
+        raise HTTPException(status_code=403, detail="Forbidden: Invalid User-Agent")
 
-    # Analyse generieren
+    # 4️⃣ Analyse starten
     try:
+        print(f"📊 Starte Analyse für User: {user}")
         results = generate_analytics_for_user(user)
 
+        # Basis-URL automatisch ermitteln
         base_url = "https://cedmate-analytics-api.onrender.com"
-        mapped = {}
+        data = {}
 
-        for key, value in results.items():
-            if value:
-                filename = Path(value).name
-                mapped[key] = f"{base_url}/output/{filename}"
+        for k, v in results.items():
+            if v:
+                filename = Path(str(v)).name
+                data[k] = f"{base_url}/output/{filename}"
             else:
-                mapped[key] = None
+                data[k] = None
 
-        return {
-            "status": "ok",
-            "user": user,
-            "results": mapped
-        }
+        print(f"✅ Fertig: {data}")
+        return {"status": "ok", "user": user, "results": data}
 
     except Exception as e:
+        print(f"⚠️ Fehler bei Analytics für {user}: {e}")
         raise HTTPException(status_code=500, detail=str(e))
