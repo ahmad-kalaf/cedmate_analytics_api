@@ -30,21 +30,20 @@ DEV_ORIGINS = [
     "http://127.0.0.1",
 ]
 
-# Regex um alle möglichen localhost-Ports zu erlauben, z. B.:
-# http://localhost:51260
+# erlaubt localhost mit beliebigen Ports (Flutter web)
 LOCALHOST_REGEX = r"^http://(localhost|127\.0\.0\.1)(:\d+)?$"
 
-# Vertrauenswürdige User-Agents (für native Apps, nicht für Browser)
+# Native App User-Agents
 TRUSTED_USER_AGENTS = [
     "flutter",
     "dart:io",
     "okhttp",
     "cedmate",
-    "mozilla"       # notwendig für Browser und Flutter Web
+    "mozilla"       # notwendig für Browser / Flutter Web
 ]
 
 # -------------------------------------------------------------
-# Output-Verzeichnis für Diagramme öffentlich machen
+# Output-Verzeichnis öffentlich erreichbar machen
 # -------------------------------------------------------------
 
 output_dir = Path(__file__).resolve().parent / "output"
@@ -52,7 +51,7 @@ output_dir.mkdir(exist_ok=True)
 app.mount("/output", StaticFiles(directory=output_dir), name="output")
 
 # -------------------------------------------------------------
-# CORS für Browser-Level (Chrome, Edge, Firefox)
+# CORS Konfiguration für Browser
 # -------------------------------------------------------------
 
 def build_cors_list():
@@ -66,8 +65,9 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=CORS_ALLOWED,
     allow_credentials=True,
-    allow_methods=["GET"],
-    allow_headers=["x-api-key", "Content-Type", "Authorization"],
+    # WICHTIG: OPTIONS muss erlaubt werden
+    allow_methods=["GET", "OPTIONS"],
+    allow_headers=["*"],
 )
 
 # -------------------------------------------------------------
@@ -83,7 +83,7 @@ def root():
     }
 
 # -------------------------------------------------------------
-# Hilfsfunktion: Origin prüfen
+# Origin Prüffunktion
 # -------------------------------------------------------------
 
 def is_allowed_origin(origin: str) -> bool:
@@ -96,7 +96,7 @@ def is_allowed_origin(origin: str) -> bool:
     return False
 
 # -------------------------------------------------------------
-# Hilfsfunktion: User-Agent prüfen
+# User-Agent Prüffunktion
 # -------------------------------------------------------------
 
 def is_allowed_user_agent(agent: str) -> bool:
@@ -104,29 +104,34 @@ def is_allowed_user_agent(agent: str) -> bool:
     return any(token in agent for token in TRUSTED_USER_AGENTS)
 
 # -------------------------------------------------------------
-# Hauptendpunkt: /analytics
+# Analytics Endpoint — GET + OPTIONS
 # -------------------------------------------------------------
 
-@app.get("/analytics")
+@app.api_route("/analytics", methods=["GET", "OPTIONS"])
 async def analytics(request: Request, user: str):
+
+    # OPTIONS-Preflight Antwort für Browser
+    if request.method == "OPTIONS":
+        return {}
+
     # API-Key prüfen
     key = request.headers.get("x-api-key")
     if key != API_KEY:
         raise HTTPException(status_code=401, detail="Unauthorized: Invalid API key")
 
-    # Origin prüfen (nur Browser-Anfragen besitzen diesen Header)
+    # Origin prüfen (nur Browser)
     origin = request.headers.get("origin", "")
     if origin:
         if not is_allowed_origin(origin):
             raise HTTPException(status_code=403, detail=f"Forbidden origin: {origin}")
 
-    # User-Agent prüfen (nur wichtig wenn keine Origin → native Apps)
+    # User-Agent prüfen (native Apps, kein Origin)
     agent = request.headers.get("user-agent", "")
     if not origin:
         if not is_allowed_user_agent(agent):
             raise HTTPException(status_code=403, detail="Forbidden: Invalid User-Agent")
 
-    # Analyse starten
+    # Analyse generieren
     try:
         results = generate_analytics_for_user(user)
 
