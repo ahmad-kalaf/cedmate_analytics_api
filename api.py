@@ -65,10 +65,10 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=CORS_ALLOWED,
     allow_credentials=True,
-    # WICHTIG: OPTIONS muss erlaubt werden
-    allow_methods=["GET", "OPTIONS"],
+    allow_methods=["*"],
     allow_headers=["*"],
 )
+
 
 # -------------------------------------------------------------
 # Healthcheck
@@ -110,9 +110,9 @@ def is_allowed_user_agent(agent: str) -> bool:
 @app.api_route("/analytics", methods=["GET", "OPTIONS"])
 async def analytics(request: Request, user: str):
 
-    # OPTIONS-Preflight Antwort für Browser
     if request.method == "OPTIONS":
         return {}
+
 
     # API-Key prüfen
     key = request.headers.get("x-api-key")
