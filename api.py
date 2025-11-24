@@ -111,3 +111,48 @@ async def analytics(request: Request, user: str):
     except Exception as e:
         print(f"⚠️ Fehler bei Analytics für {user}: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/export")
+async def export_data(request: Request, user: str):
+    """
+    Exportiert Benutzerdaten + Diagramme als PDF
+    Gleiche Sicherheitschecks wie /analytics
+    """
+
+    # API-Key prüfen
+    key = request.headers.get("x-api-key")
+    if key != API_KEY:
+        raise HTTPException(status_code=401, detail="Unauthorized: Invalid API key")
+
+    # Origin prüfen (für Web)
+    origin = request.headers.get("origin", "")
+    if origin and not any(origin.startswith(o) for o in ALLOWED_ORIGINS):
+        raise HTTPException(status_code=403, detail=f"Forbidden origin: {origin}")
+
+    # User-Agent prüfen (für native Apps)
+    agent = request.headers.get("user-agent", "").lower()
+    if origin == "" and not any(re.search(pat.lower(), agent) for pat in TRUSTED_USER_AGENTS):
+        raise HTTPException(status_code=403, detail="Forbidden: Invalid User-Agent")
+
+    # Export starten
+    try:
+        print(f"📄 Starte Daten-Export für User: {user}")
+
+        # ⬇️ PDF generieren (you create this function next)
+        pdf_path = generate_export_pdf_for_user(user)
+
+        base_url = "https://cedmate-analytics-api.onrender.com"
+        filename = Path(str(pdf_path)).name
+        pdf_url = f"{base_url}/output/{filename}"
+
+        print(f"📄 Export fertig: {pdf_url}")
+        return {
+            "status": "ok",
+            "user": user,
+            "pdf": pdf_url
+        }
+
+    except Exception as e:
+        print(f"⚠️ Fehler beim Export für {user}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
