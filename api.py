@@ -12,6 +12,7 @@ from fastapi.staticfiles import StaticFiles
 from pathlib import Path
 from firebase_admin import auth
 from cedmate_analytics import generate_analytics_for_user
+from export_pdf import generate_export_pdf_for_user   # ← DAS FEHLTE
 import re
 import os
 
